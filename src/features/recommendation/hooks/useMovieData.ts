@@ -952,12 +952,12 @@ export const useMovieData = (settings?: AppSettings) => {
       setFilteredRecommendationsLocal((prev: any) => Array.isArray(prev) ? prev.filter((rec: any) => rec.id !== itemId) : []);
       
       // 10 puanlama sonrası AI önerilerini başlat
-      if (validNewRatings.length === 10 && !Array.isArray(recommendations) || recommendations.length === 0) {
+      if (validNewRatings.length === 10 && (!Array.isArray(recommendations) || recommendations.length === 0) && currentProfile) {
         try {
           console.log('10 puanlama tamamlandı! AI önerileri başlatılıyor...');
-          const watchlistIds = watchlist.map(w => w.id);
+          const watchlistIds = Array.isArray(watchlist) ? watchlist.map(w => w.id) : [];
           const recs = await RecommendationService.generateRecommendations(
-            currentProfile!, 
+            currentProfile, 
             genres, 
             tvGenres,
             newRatings,
@@ -1127,7 +1127,7 @@ export const useMovieData = (settings?: AppSettings) => {
         profile, 
         genres, 
         tvGenres,
-        ratings,
+        Array.isArray(ratings) ? ratings : [],
         recommendationFilters, // Filtreleri geçir
         settings?.recommendationCount !== undefined ? { recommendationCount: settings.recommendationCount } : {} // Ayarları geçir
       );

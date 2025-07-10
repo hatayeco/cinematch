@@ -7,7 +7,7 @@ import { logger } from '../../../shared/utils/logger';
 
 export class RecommendationService {
   static async generateRecommendations(
-    profile: UserProfile, 
+    profile: UserProfile | null, 
     movieGenres: Genre[], 
     tvGenres: Genre[],
     existingRatings: UserRating[] = [],
@@ -30,6 +30,23 @@ export class RecommendationService {
     },
     watchlistIds?: number[]
   ): Promise<Recommendation[]> {
+    // Null profile kontrolü
+    if (!profile) {
+      logger.warn('Profile is null, returning empty recommendations');
+      return [];
+    }
+
+    // Profile'ın required fields kontrolü
+    if (!profile.totalRatings || typeof profile.totalRatings !== 'number' || profile.totalRatings < 0) {
+      logger.warn('Profile has invalid totalRatings, using default');
+      profile.totalRatings = 0;
+    }
+
+    if (!profile.genreDistribution || typeof profile.genreDistribution !== 'object') {
+      logger.warn('Profile has invalid genreDistribution, using default');
+      profile.genreDistribution = {};
+    }
+
     const recommendations: Recommendation[] = [];
     const allGenres = [...movieGenres, ...tvGenres];
 
@@ -290,27 +307,37 @@ export class RecommendationService {
     allGenres: Genre[],
     ratedContentIds: Set<number>
   ) {
-    // Kullanıcının tür kombinasyonu tercihlerini analiz et
-    const userGenreCombinationsObj = ContentBasedFiltering.analyzeUserGenreCombinations(profile);
-    const userGenreCombinations = Array.isArray(userGenreCombinationsObj) ? userGenreCombinationsObj : Object.values(userGenreCombinationsObj);
+    // Null kontrolü
+    if (!profile || !profile.genreDistribution) {
+      logger.warn('Profile or genreDistribution is null in generateContentBasedRecommendations');
+      return;
+    }
 
-    // Get top genres
-    const topGenres = Object.entries(profile.genreDistribution)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 8)
-      .map(([genreId]) => genreId);
+    try {
+      // Kullanıcının tür kombinasyonu tercihlerini analiz et
+      const userGenreCombinationsObj = ContentBasedFiltering.analyzeUserGenreCombinations(profile);
+      const userGenreCombinations = Array.isArray(userGenreCombinationsObj) ? userGenreCombinationsObj : Object.values(userGenreCombinationsObj);
 
-    // Film önerileri
-    await this.generateEnhancedMovieRecommendations(
-      recommendations, profile, topGenres, userGenreCombinations, 
-      allGenres, ratedContentIds
-    );
-    
-    // Dizi önerileri
-    await this.generateEnhancedTVRecommendations(
-      recommendations, profile, topGenres, userGenreCombinations, 
-      allGenres, ratedContentIds
-    );
+      // Get top genres
+      const topGenres = Object.entries(profile.genreDistribution)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 8)
+        .map(([genreId]) => genreId);
+
+      // Film önerileri
+      await this.generateEnhancedMovieRecommendations(
+        recommendations, profile, topGenres, userGenreCombinations, 
+        allGenres, ratedContentIds
+      );
+      
+      // Dizi önerileri
+      await this.generateEnhancedTVRecommendations(
+        recommendations, profile, topGenres, userGenreCombinations, 
+        allGenres, ratedContentIds
+      );
+    } catch (error) {
+      logger.error('Error in generateContentBasedRecommendations:', error);
+    }
   }
 
   // Tür-spesifik öneriler
@@ -320,17 +347,27 @@ export class RecommendationService {
     allGenres: Genre[],
     ratedContentIds: Set<number>
   ) {
-    const topUserGenres = Object.entries(profile.genreDistribution)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 5)
-      .map(([genreId, score]) => ({ id: parseInt(genreId), score }));
+    // Null kontrolü
+    if (!profile || !profile.genreDistribution) {
+      logger.warn('Profile or genreDistribution is null in generateGenreSpecificRecommendations');
+      return;
+    }
 
-    for (const userGenre of topUserGenres) {
-      if (userGenre.score > 10) {
-        await this.generateSpecificGenreRecommendations(
-          recommendations, profile, userGenre.id, allGenres, ratedContentIds
-        );
+    try {
+      const topUserGenres = Object.entries(profile.genreDistribution)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 5)
+        .map(([genreId, score]) => ({ id: parseInt(genreId), score }));
+
+      for (const userGenre of topUserGenres) {
+        if (userGenre.score > 10) {
+          await this.generateSpecificGenreRecommendations(
+            recommendations, profile, userGenre.id, allGenres, ratedContentIds
+          );
+        }
       }
+    } catch (error) {
+      logger.error('Error in generateGenreSpecificRecommendations:', error);
     }
   }
 
@@ -463,9 +500,16 @@ export class RecommendationService {
     allGenres: Genre[],
     ratedContentIds: Set<number>
   ) {
-    const allGenreIds = allGenres.map(g => g.id);
-    const userGenreIds = Object.keys(profile.genreDistribution).map(id => parseInt(id));
-    const unexploredGenres = allGenreIds.filter(id => !userGenreIds.includes(id));
+    // Null kontrolü
+    if (!profile || !profile.genreDistribution) {
+      logger.warn('Profile or genreDistribution is null in generateDiversityRecommendations');
+      return;
+    }
+
+    try {
+      const allGenreIds = allGenres.map(g => g.id);
+      const userGenreIds = Object.keys(profile.genreDistribution).map(id => parseInt(id));
+      const unexploredGenres = allGenreIds.filter(id => !userGenreIds.includes(id));
 
     const popularGenres = [28, 35, 18, 878, 27, 10749, 53, 16];
     const genresToExplore = unexploredGenres.filter(id => popularGenres.includes(id)).slice(0, 3);
@@ -538,6 +582,9 @@ export class RecommendationService {
       } catch (error) {
         logger.warn(`Error generating diversity recommendations for genre ${genreId}:`, error);
       }
+    }
+    } catch (error) {
+      logger.error('Error in generateDiversityRecommendations:', error);
     }
   }
 
@@ -960,22 +1007,36 @@ export class RecommendationService {
   private static generateEnhancedMovieReasons(movie: Movie, profile: UserProfile, genres: Genre[]): string[] {
     const reasons: string[] = [];
 
-    const movieGenres = movie.genre_ids || [];
-    const { matchedCombinations } = ContentBasedFiltering.calculateGenreCombinationScore(profile, movieGenres);
-    
-    if (matchedCombinations.length > 0) {
-      reasons.push(`Sevdiğin kombinasyonlar: ${matchedCombinations[0]}`);
+    // Null kontrolü
+    if (!profile || !profile.genreDistribution) {
+      reasons.push('Kaliteli yapım');
+      return reasons;
     }
 
-    if (matchedCombinations.length === 0) {
-      const matchingGenres = movieGenres.filter(genreId => profile.genreDistribution[genreId] > 8);
-      if (matchingGenres.length > 0) {
-        const genreNames = matchingGenres.map(genreId => {
-          const genre = genres.find(g => g.id === genreId);
-          return genre?.name || 'Bilinmeyen';
-        });
-        reasons.push(`${genreNames.join(' ve ')} türlerinde yüksek puan vermişsin`);
+    const movieGenres = movie.genre_ids || [];
+    
+    try {
+      const { matchedCombinations } = ContentBasedFiltering.calculateGenreCombinationScore(profile, movieGenres);
+      
+      if (matchedCombinations && matchedCombinations.length > 0) {
+        reasons.push(`Sevdiğin kombinasyonlar: ${matchedCombinations[0]}`);
       }
+
+      if (!matchedCombinations || matchedCombinations.length === 0) {
+        const matchingGenres = movieGenres.filter(genreId => 
+          profile.genreDistribution && profile.genreDistribution[genreId] && profile.genreDistribution[genreId] > 8
+        );
+        if (matchingGenres.length > 0) {
+          const genreNames = matchingGenres.map(genreId => {
+            const genre = genres.find(g => g.id === genreId);
+            return genre?.name || 'Bilinmeyen';
+          });
+          reasons.push(`${genreNames.join(' ve ')} türlerinde yüksek puan vermişsin`);
+        }
+      }
+    } catch (error) {
+      logger.warn('Error in generateEnhancedMovieReasons:', error);
+      reasons.push('Kaliteli yapım');
     }
 
     if (movie.vote_average >= 8.0) {
@@ -1041,22 +1102,36 @@ export class RecommendationService {
   private static generateEnhancedTVReasons(tvShow: TVShow, profile: UserProfile, genres: Genre[]): string[] {
     const reasons: string[] = [];
 
-    const tvGenres = tvShow.genre_ids || [];
-    const { matchedCombinations } = ContentBasedFiltering.calculateGenreCombinationScore(profile, tvGenres);
-    
-    if (matchedCombinations.length > 0) {
-      reasons.push(`Sevdiğin kombinasyonlar: ${matchedCombinations[0]}`);
+    // Null kontrolü
+    if (!profile || !profile.genreDistribution) {
+      reasons.push('Kaliteli dizi');
+      return reasons;
     }
 
-    if (matchedCombinations.length === 0) {
-      const matchingGenres = tvGenres.filter(genreId => profile.genreDistribution[genreId] > 8);
-      if (matchingGenres.length > 0) {
-        const genreNames = matchingGenres.map(genreId => {
-          const genre = genres.find(g => g.id === genreId);
-          return genre?.name || 'Bilinmeyen';
-        });
-        reasons.push(`${genreNames.join(' ve ')} türlerinde yüksek puan vermişsin`);
+    const tvGenres = tvShow.genre_ids || [];
+    
+    try {
+      const { matchedCombinations } = ContentBasedFiltering.calculateGenreCombinationScore(profile, tvGenres);
+      
+      if (matchedCombinations && matchedCombinations.length > 0) {
+        reasons.push(`Sevdiğin kombinasyonlar: ${matchedCombinations[0]}`);
       }
+
+      if (!matchedCombinations || matchedCombinations.length === 0) {
+        const matchingGenres = tvGenres.filter(genreId => 
+          profile.genreDistribution && profile.genreDistribution[genreId] && profile.genreDistribution[genreId] > 8
+        );
+        if (matchingGenres.length > 0) {
+          const genreNames = matchingGenres.map(genreId => {
+            const genre = genres.find(g => g.id === genreId);
+            return genre?.name || 'Bilinmeyen';
+          });
+          reasons.push(`${genreNames.join(' ve ')} türlerinde yüksek puan vermişsin`);
+        }
+      }
+    } catch (error) {
+      logger.warn('Error in generateEnhancedTVReasons:', error);
+      reasons.push('Kaliteli dizi');
     }
 
     if (tvShow.vote_average >= 8.0) {
