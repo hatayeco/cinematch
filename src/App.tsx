@@ -226,8 +226,14 @@ function App() {
     }
   }, [activeTab, hasEnoughRatingsForAI, curatedContentLoading, movies.length, loadAILearningContent]);
 
-  // Onboarding kontrolü - hiç puanlama yoksa ve onboarding tamamlanmamışsa onboarding'i başlat
+  // Onboarding kontrolü - sadece authenticated kullanıcılar için
   useEffect(() => {
+    // Sadece authenticated kullanıcılar için onboarding kontrolü yap
+    if (!isAuthenticated) {
+      setShowOnboarding(false);
+      return;
+    }
+
     const validRatings = (ratings || []).filter(r => 
       r.rating !== 'not_watched' && 
       r.rating !== 'not_interested' && 
@@ -250,7 +256,7 @@ function App() {
       localStorage.removeItem('onboardingCompleted');
       setShowOnboarding(true);
     }
-  }, [ratings, showOnboarding]);
+  }, [ratings, showOnboarding, isAuthenticated]);
 
   const phaseInfo = getPhaseInfo();
 

@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
-// PostgreSQL Connection Pool
+// PostgreSQL Connection Pool with fallback handling
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
@@ -10,21 +10,31 @@ const pool = new Pool({
   connectionTimeoutMillis: 2000, // return an error after 2 seconds if connection could not be established
 });
 
-// Test database connection
+let isDBConnected = false;
+
+// Test database connection with graceful fallback
 const testConnection = async () => {
   try {
     const client = await pool.connect();
     console.log('✅ Successfully connected to PostgreSQL database');
     client.release();
+    isDBConnected = true;
     return true;
   } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
+    console.warn('⚠️ Database connection failed:', error.message);
+    console.log('🔄 Server will continue without database functionality');
+    isDBConnected = false;
     return false;
   }
 };
 
-// Execute query with error handling
+// Execute query with error handling and database availability check
 const query = async (text, params = []) => {
+  if (!isDBConnected) {
+    console.warn('Database not available, skipping query:', text.substring(0, 50) + '...');
+    return { rows: [], rowCount: 0 };
+  }
+
   const start = Date.now();
   try {
     const result = await pool.query(text, params);
@@ -37,20 +47,26 @@ const query = async (text, params = []) => {
     return result;
   } catch (error) {
     console.error('Database query error:', { text: text.substring(0, 50) + '...', error: error.message });
-    throw error;
+    // Don't throw error, return empty result instead
+    return { rows: [], rowCount: 0 };
   }
 };
 
 // Get a client from the pool for transactions
 const getClient = async () => {
+  if (!isDBConnected) {
+    throw new Error('Database not available');
+  }
   return await pool.connect();
 };
 
 // Graceful shutdown
 const shutdown = async () => {
-  console.log('Closing database connections...');
-  await pool.end();
-  console.log('Database connections closed.');
+  if (isDBConnected) {
+    console.log('Closing database connections...');
+    await pool.end();
+    console.log('Database connections closed.');
+  }
 };
 
 module.exports = {
@@ -58,5 +74,6 @@ module.exports = {
   query,
   getClient,
   testConnection,
-  shutdown
+  shutdown,
+  isDBConnected: () => isDBConnected
 };

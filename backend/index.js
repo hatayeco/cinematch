@@ -64,11 +64,11 @@ const initializeDatabase = async () => {
       await runMigrations();
       console.log('✅ Database setup completed successfully');
     } else {
-      throw new Error('Database connection failed');
+      console.log('⚠️ Database not available - server will continue without database features');
     }
   } catch (error) {
-    console.error('❌ Database initialization failed:', error.message);
-    process.exit(1);
+    console.warn('⚠️ Database initialization failed:', error.message);
+    console.log('🔄 Server will continue in limited mode without database');
   }
 };
 
@@ -268,6 +268,8 @@ app.delete('/api/cache/recommendations/:userId', async (req, res) => {
   }
 });
 
+*/
+
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
   try {
@@ -308,7 +310,6 @@ app.get('/api/health', async (req, res) => {
     });
   }
 });
-*/
 
 // ===== EXISTING BFI ENDPOINTS ===== 
 
